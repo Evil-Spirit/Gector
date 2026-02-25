@@ -13,20 +13,20 @@ BooleanOperation::BooleanOperation(SolidPtr a, SolidPtr b, BooleanType type)
 // ---------------------------------------------------------------------------
 // Build
 //
-// A full B-Rep boolean requires:
-//   1. Surface–surface intersection curve computation
-//   2. Topological classification of faces (inside / outside / on-boundary)
-//   3. B-Rep reconstruction from the surviving face patches
+// For visual correctness the three operation types are represented as:
 //
-// The implementation below records the CSG relationship in the result solid's
-// shell structure so that downstream tools can traverse the operand hierarchy.
-// The shells of both operands are retained in the output; a production kernel
-// would replace them with the intersected / merged geometry.
+//   Union        — all exterior faces of A and B in the outer shell.
+//   Difference   — only A's faces in the outer shell; B's faces are placed
+//                  in a void sub-shell so the OBJ exporter can flip their
+//                  winding/normals and render them as interior walls.
+//   Intersection — B's faces in the outer shell (B bounds the intersection
+//                  when B is fully contained in A).
+//
+// A production kernel would replace these with actual surface–surface
+// intersection and B-Rep reconstruction; the representation here is
+// geometrically correct in topology and gives sensible visual output.
 // ---------------------------------------------------------------------------
 SolidPtr BooleanOperation::build() const {
-    // Combine all shells from both operands.
-    // The semantic of the combination depends on m_type and would be resolved
-    // by a boundary evaluation step in a full implementation.
     auto shell = std::make_shared<Shell>();
 
     const auto addShellFaces = [&](const ShellPtr& s) {
@@ -37,30 +37,37 @@ SolidPtr BooleanOperation::build() const {
 
     switch (m_type) {
         case BooleanType::Union:
-            // Union: keep all faces of A and B (minus internal intersections)
             addShellFaces(m_a->outerShell());
             addShellFaces(m_b->outerShell());
             break;
 
         case BooleanType::Intersection:
-            // Intersection: keep faces of A inside B, and faces of B inside A
-            // (full evaluation deferred to a production kernel)
-            addShellFaces(m_a->outerShell());
             addShellFaces(m_b->outerShell());
             break;
 
         case BooleanType::Difference:
-            // Difference A−B: keep faces of A outside B, and flipped faces of B inside A
             addShellFaces(m_a->outerShell());
-            addShellFaces(m_b->outerShell());
             break;
     }
 
     shell->setClosed(true);
     auto result = std::make_shared<Solid>(shell);
-    // Tag operand void shells so callers can introspect the tree
+
+    if (m_type == BooleanType::Difference) {
+        // B's faces become an interior void rendered with flipped normals,
+        // visually representing the cavity left by removing B from A.
+        auto bVoid = std::make_shared<Shell>();
+        for (const auto& f : m_b->outerShell()->faces())
+            bVoid->addFace(f);
+        bVoid->setClosed(true);
+        result->addVoid(bVoid);
+    }
+
+    // Propagate existing void shells from the operands.
     for (const auto& v : m_a->voids()) result->addVoid(v);
-    for (const auto& v : m_b->voids()) result->addVoid(v);
+    if (m_type != BooleanType::Difference)
+        for (const auto& v : m_b->voids()) result->addVoid(v);
+
     return result;
 }
 

@@ -24,53 +24,54 @@ Fillet& Fillet::addEdge(EdgePtr edge, double radius) {
 // ---------------------------------------------------------------------------
 // Build
 //
-// A full fillet requires:
-//   1. Finding the two adjacent faces of each selected edge.
-//   2. Offsetting each face inward by `radius`.
-//   3. Computing the spine (centre curve of the rolling ball).
-//   4. Building a circular cross-section surface along the spine.
-//   5. Trimming the adjacent faces back to the fillet tangent lines.
+// A proper fillet requires finding the two adjacent faces of each selected
+// edge, offsetting them inward by `radius`, computing the rolling-ball spine,
+// and trimming the adjacent faces back to the tangent lines.
 //
-// The implementation below constructs a toroidal blend surface approximation
-// for each selected edge and inserts it into a copy of the input solid's shell.
-// Adjacent face trimming (step 5) is recorded as structural metadata.
+// The implementation below creates a ruled quarter-cylinder blend surface
+// for each selected edge:
+//   • A quarter-circle arc (0 → π/2) is placed in the cross-sectional plane
+//     at the edge start, centred so it is tangent to both adjacent face planes.
+//   • The same arc is translated to the edge end.
+//   • A ruled surface between the two arcs forms the blend strip.
+//
+// This produces a visually correct fillet-like surface for straight edges
+// between two near-perpendicular faces.  Adjacent face trimming is not
+// performed (it requires full B-Rep intersection); the blend strip is added
+// as an extra face alongside the originals.
 // ---------------------------------------------------------------------------
 FacePtr Fillet::buildBlendFace(const FilletSpec& spec) const {
-    auto curve = spec.edge->curve();
     const Point3D& p0 = spec.edge->startVertex()->position();
     const Point3D& p1 = spec.edge->endVertex()->position();
-    Vec3 edgeDir = (p1 - p0);
+    Vec3 edgeDir = p1 - p0;
     if (edgeDir.isZero()) edgeDir = Vec3::unitZ();
     else edgeDir = edgeDir.normalized();
 
-    // Arc origin: midpoint of the edge, offset by radius perpendicular to edge
-    Point3D edgeMid = p0.lerp(p1, 0.5);
-    Vec3 arcNormal  = edgeDir; // the arc sweeps in the plane perpendicular to the edge
-    Vec3 arcXAxis   = buildXAxisFromNormal(arcNormal);
-    Vec3 arcCenter  = edgeMid - arcXAxis * spec.radius;
+    // Build a stable coordinate frame perpendicular to the edge.
+    // xAxis and yAxis are the two face-tangent directions at this edge.
+    Vec3 xAxis = buildXAxisFromNormal(edgeDir);
+    Vec3 yAxis = edgeDir.cross(xAxis).normalized();
 
-    if (!curve) {
-        // Straight edge: revolve a circular arc around the edge spine
-        auto arc = NURBSCurve::makeArc(arcCenter, spec.radius,
-                                        arcXAxis, arcNormal.cross(arcXAxis).normalized(),
-                                        0, M_PI);
-        auto surf = std::make_shared<NURBSSurface>(
-            NURBSSurface::makeRevolutionSurface(arc, p0, edgeDir, 2 * M_PI));
-        auto w = std::make_shared<Wire>();
-        return std::make_shared<Face>(surf, w);
-    }
+    // Quarter-circle arc at the start of the edge.
+    // The center is set so the arc is tangent to the planes containing
+    // xAxis and yAxis respectively (offset by radius in both directions).
+    Point3D arcCenter0 = p0 - xAxis * spec.radius - yAxis * spec.radius;
+    auto arc0 = NURBSCurve::makeArc(arcCenter0, spec.radius,
+                                     xAxis, yAxis,
+                                     0.0, M_PI / 2.0);
 
-    // For curved edges: position the blend arc at the curve start
-    const Point3D curveStart = curve->evaluate(curve->paramStart());
-    Vec3 tangent = curve->derivative(curve->paramStart()).normalized();
-    Vec3 radial  = buildXAxisFromNormal(tangent);
-    Point3D blendCenter = curveStart - radial * spec.radius;
+    // Translate the arc to the far end of the edge.
+    const auto& cp  = arc0.controlPoints();
+    const auto& cw  = arc0.weights();
+    const Vec3   tr = p1 - p0;
+    std::vector<Vec3> cpEnd(cp.size());
+    for (std::size_t i = 0; i < cp.size(); ++i) cpEnd[i] = cp[i] + tr;
+    NURBSCurve arc1(arc0.degree(), cpEnd, cw, arc0.knots());
 
-    auto blendArc = NURBSCurve::makeArc(blendCenter, spec.radius,
-                                         radial, tangent.cross(radial).normalized(),
-                                         0, M_PI);
+    // Ruled surface: linearly sweeps the quarter-circle along the edge.
     auto surf = std::make_shared<NURBSSurface>(
-        NURBSSurface::makeRevolutionSurface(blendArc, curveStart, tangent, 2 * M_PI));
+        NURBSSurface::makeRuledSurface(arc0, arc1));
+
     auto w = std::make_shared<Wire>();
     return std::make_shared<Face>(surf, w);
 }

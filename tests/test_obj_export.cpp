@@ -224,8 +224,9 @@ TEST(ObjExport, RevolveSpline) {
 // Boolean operations
 // ---------------------------------------------------------------------------
 TEST(ObjExport, BooleanUnion_TwoBoxes) {
+    // Use different sizes so both shapes are visible without z-fighting.
     auto a = BRepBuilder::makeBox(10, 10, 10);
-    auto b = BRepBuilder::makeBox(10, 10, 10);  // identical – full union
+    auto b = BRepBuilder::makeBox(6, 14, 8);  // different dimensions, both at origin
     auto result = BooleanOperation(a, b, BooleanType::Union).build();
     ObjExporter exp;
     exp.setSurfaceSteps(8);
@@ -248,6 +249,7 @@ TEST(ObjExport, BooleanUnion_BoxAndCylinder) {
 }
 
 TEST(ObjExport, BooleanDifference_BoxMinusCylinder) {
+    // A's exterior faces + cylinder faces as void (inner walls, flipped normals).
     auto box = BRepBuilder::makeBox(12, 12, 12);
     auto cyl = BRepBuilder::makeCylinder({6,6,0}, Vec3::unitZ(), 3.5, 14.0);
     auto result = BooleanOperation(box, cyl, BooleanType::Difference).build();
@@ -257,6 +259,8 @@ TEST(ObjExport, BooleanDifference_BoxMinusCylinder) {
     ASSERT_TRUE(exp.writeSolid(result, path));
     ASSERT_TRUE(fileExists(path));
     ASSERT_TRUE(countObjLines(path, "f ") > 0);
+    // Void shell faces appear as a separate group in the OBJ
+    ASSERT_TRUE(countObjLines(path, "g solid_void") > 0);
 }
 
 TEST(ObjExport, BooleanDifference_BoxMinusSphere) {

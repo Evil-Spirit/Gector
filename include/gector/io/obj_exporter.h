@@ -3,6 +3,7 @@
 #include <string>
 #include <ostream>
 #include <vector>
+#include <array>
 
 namespace gector {
 
@@ -13,8 +14,13 @@ namespace gector {
  *  - Curved NURBS surface (degree > 1 in at least one direction):
  *      uniformly sampled at (uSteps × vSteps) grid, triangulated as quads.
  *  - Flat surface (degree 1 × 1) or no surface:
- *      boundary curves are sampled directly (curveSamples points per edge),
- *      the resulting polygon is fan-triangulated from its centroid.
+ *      boundary curves are sampled and ear-clipping triangulation is applied.
+ *      Degree-1 (line) edges contribute 1 sample (corner only); higher-degree
+ *      curves contribute curveSamples points.
+ *
+ * Void sub-shells (e.g. the B operand of a boolean Difference) are
+ * rendered with flipped winding and negated normals so they appear as
+ * interior cavity surfaces in the mesh.
  *
  * Usage:
  * @code
@@ -39,7 +45,7 @@ public:
     void setSurfaceSteps(int n) { setUSteps(n); setVSteps(n); }
 
     /// Number of points sampled per boundary curve edge when tessellating
-    /// planar caps (default 16).
+    /// planar caps (default 16; degree-1 edges always use 1 sample = corner).
     void setCurveSamples(int n) { m_curveSamples = std::max(2, n); }
 
     int uSteps()       const noexcept { return m_uSteps; }
@@ -82,20 +88,29 @@ private:
     bool isFlatFace(const FacePtr& face) const noexcept;
 
     /// Sample curved NURBS surface grid → two triangles per quad cell.
+    /// flip=true reverses winding and negates normals (for void shells).
     /// Returns number of OBJ vertices emitted.
     int tessellateNURBSFace(const FacePtr& face,
                              std::ostream& os,
-                             int vOffset) const;
+                             int vOffset,
+                             bool flip) const;
 
-    /// Sample boundary wire edge curves, build a polygon and fan-triangulate.
-    /// Works for circular caps, rectangular caps, spline profiles, etc.
+    /// Ear-clip boundary polygon into triangles.
+    /// flip=true reverses winding and negates normals (for void shells).
     /// Returns number of OBJ vertices emitted.
     int tessellatePlanarCap(const FacePtr& face,
                              std::ostream& os,
-                             int vOffset) const;
+                             int vOffset,
+                             bool flip) const;
 
     /// Collect boundary polygon by sampling each edge's NURBS curve.
+    /// Degree-1 (line) curves use 1 sample; higher-degree use curveSamples.
     std::vector<Vec3> sampleBoundaryPolygon(const FacePtr& face) const;
+
+    /// Ear-clipping triangulation of a planar polygon projected onto the plane
+    /// defined by `normal`.  Returns a list of {a,b,c} index triplets into pts.
+    static std::vector<std::array<int,3>>
+        triangulatePolygon(const std::vector<Vec3>& pts, const Vec3& normal);
 };
 
 } // namespace gector

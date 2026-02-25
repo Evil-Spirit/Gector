@@ -39,27 +39,47 @@ SolidPtr Extrusion::build() const {
     if (verts.size() < 2)
         throw std::runtime_error("Extrusion profile has no vertices");
 
+    bool profileClosed = m_profile->isClosed();
     auto shell = std::make_shared<Shell>();
 
     // -----------------------------------------------------------
     // Bottom face (the original profile wire, normal ~ -direction)
+    // Only for closed profiles; open profiles produce an open shell.
     // -----------------------------------------------------------
-    {
+    if (profileClosed) {
         auto botFace = std::make_shared<Face>(nullptr, m_profile);
         shell->addFace(botFace);
     }
 
     // -----------------------------------------------------------
     // Top face (translated profile, normal ~ +direction)
+    // Only for closed profiles.
     // -----------------------------------------------------------
-    {
+    if (profileClosed) {
         auto topWire = std::make_shared<Wire>();
         for (const auto& e : m_profile->edges()) {
             Point3D tp0 = e->startVertex()->position() + sweep;
             Point3D tp1 = e->endVertex()->position()   + sweep;
             auto tv0 = std::make_shared<Vertex>(tp0);
             auto tv1 = std::make_shared<Vertex>(tp1);
-            auto tc  = std::make_shared<NURBSCurve>(NURBSCurve::makeLine(tp0, tp1));
+
+            std::shared_ptr<NURBSCurve> tc;
+            auto baseCurve = e->curve();
+            if (baseCurve) {
+                // Translate the original curve's control points.
+                // This correctly handles circles, arcs and splines –
+                // the previous code used makeLine(tp0, tp1) which was
+                // degenerate for closed edges where tp0 == tp1.
+                const auto& bcp = baseCurve->controlPoints();
+                const auto& bw  = baseCurve->weights();
+                std::vector<Vec3> tcp(bcp.size());
+                for (std::size_t k = 0; k < bcp.size(); ++k)
+                    tcp[k] = bcp[k] + sweep;
+                tc = std::make_shared<NURBSCurve>(
+                    baseCurve->degree(), tcp, bw, baseCurve->knots());
+            } else {
+                tc = std::make_shared<NURBSCurve>(NURBSCurve::makeLine(tp0, tp1));
+            }
             topWire->addEdge(std::make_shared<Edge>(tv0, tv1, tc));
         }
         auto topFace = std::make_shared<Face>(nullptr, topWire);
@@ -107,7 +127,7 @@ SolidPtr Extrusion::build() const {
         shell->addFace(std::make_shared<Face>(surf, sideWire));
     }
 
-    shell->setClosed(true);
+    shell->setClosed(profileClosed);
     return std::make_shared<Solid>(shell);
 }
 
