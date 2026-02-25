@@ -1,0 +1,2 @@
+# Gector
+AI geometric core
