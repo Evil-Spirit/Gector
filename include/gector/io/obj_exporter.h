@@ -103,6 +103,20 @@ private:
                              int vOffset,
                              bool flip) const;
 
+    /// Tessellate a trimmed curved NURBS face (samples the surface grid
+    /// and skips parameter points outside the active trim region).
+    int tessellateTrimmmedNURBSFace(const FacePtr& face,
+                                     std::ostream& os,
+                                     int vOffset,
+                                     bool flip) const;
+
+    /// Tessellate a trimmed planar face (samples in a fine grid within
+    /// the boundary extent, masks inactive parameter points).
+    int tessellateTrimmmedPlanarFace(const FacePtr& face,
+                                      std::ostream& os,
+                                      int vOffset,
+                                      bool flip) const;
+
     /// Collect boundary polygon by sampling each edge's NURBS curve.
     /// Degree-1 (line) curves use 1 sample; higher-degree use curveSamples.
     std::vector<Vec3> sampleBoundaryPolygon(const FacePtr& face) const;
@@ -111,13 +125,6 @@ private:
     /// defined by `normal`.  Returns a list of {a,b,c} index triplets into pts.
     static std::vector<std::array<int,3>>
         triangulatePolygon(const std::vector<Vec3>& pts, const Vec3& normal);
-
-    /// Write a pre-computed triangle mesh (stored on the Solid by Boolean
-    /// operations) directly to the OBJ stream.
-    void writePrecomputedMesh(const SolidPtr& solid,
-                               const std::string& objectName,
-                               std::ostream& os,
-                               int& vertexOffset) const;
 };
 
 } // namespace gector

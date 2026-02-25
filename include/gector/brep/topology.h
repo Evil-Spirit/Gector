@@ -2,6 +2,7 @@
 #include "gector/math/vec3.h"
 #include "gector/nurbs/nurbs_curve.h"
 #include "gector/nurbs/nurbs_surface.h"
+#include "gector/nurbs/trimmed_nurbs_surface.h"
 #include <vector>
 #include <memory>
 #include <string>
@@ -132,6 +133,16 @@ public:
     /// Outward unit normal at the centre of the face (approximation).
     Vec3 normal() const;
 
+    // Optional trimmed surface (present when this face has been trimmed by
+    // a Boolean operation). When set, the active region of the underlying
+    // NURBS surface is restricted by the trim loops.
+    void setTrimmedSurface(std::shared_ptr<TrimmedNURBSSurface> ts) {
+        m_trimmed = std::move(ts);
+    }
+    std::shared_ptr<TrimmedNURBSSurface> trimmedSurface() const noexcept {
+        return m_trimmed;
+    }
+
     const std::string& name() const noexcept { return m_name; }
     void setName(const std::string& n) { m_name = n; }
 
@@ -139,6 +150,7 @@ private:
     std::shared_ptr<NURBSSurface> m_surface;
     WirePtr                       m_outer;
     std::vector<WirePtr>          m_holes;
+    std::shared_ptr<TrimmedNURBSSurface> m_trimmed;
     std::string                   m_name;
 };
 
@@ -168,18 +180,6 @@ private:
 };
 
 // ===========================================================================
-/// @brief A single triangle with per-vertex positions and per-vertex normals.
-///
-/// Used to store a pre-tessellated mesh on a Solid (e.g. the result of a
-/// mesh-level Boolean operation) so that the OBJ exporter can write it
-/// directly without re-tessellating NURBS shells.
-// ===========================================================================
-struct Triangle {
-    Vec3 v0, v1, v2;  ///< Vertex positions
-    Vec3 n0, n1, n2;  ///< Per-vertex outward unit normals
-};
-
-// ===========================================================================
 /// @brief A 3-D solid bounded by one outer shell and optional void shells.
 // ===========================================================================
 class Solid {
@@ -196,26 +196,12 @@ public:
     /// Total number of faces across all shells.
     std::size_t faceCount() const;
 
-    // -----------------------------------------------------------------------
-    // Pre-computed triangle mesh (optional).
-    //
-    // When non-empty this mesh is used by ObjExporter instead of
-    // re-tessellating NURBS shells.  Boolean operations populate this
-    // field with the result of the mesh-level classification pass.
-    // -----------------------------------------------------------------------
-    void setComputedMesh(std::vector<Triangle> mesh) {
-        m_computedMesh = std::move(mesh);
-    }
-    bool                         hasComputedMesh() const noexcept { return !m_computedMesh.empty(); }
-    const std::vector<Triangle>& computedMesh()    const noexcept { return m_computedMesh; }
-
     const std::string& name() const noexcept { return m_name; }
     void setName(const std::string& n) { m_name = n; }
 
 private:
     ShellPtr              m_outer;
     std::vector<ShellPtr> m_voids;
-    std::vector<Triangle> m_computedMesh;
     std::string           m_name;
 };
 

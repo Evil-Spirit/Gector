@@ -1,6 +1,8 @@
 #include "gector/io/obj_exporter.h"
 #include "gector/nurbs/nurbs_curve.h"
 #include "gector/nurbs/nurbs_surface.h"
+#include "gector/nurbs/trimmed_nurbs_surface.h"
+#include "gector/nurbs/nurbs_intersection.h"
 #include "gector/math/vec3.h"
 #include <fstream>
 #include <sstream>
@@ -183,6 +185,11 @@ int ObjExporter::tessellatePlanarCap(const FacePtr& face,
                                       std::ostream& os,
                                       int vOffset,
                                       bool flip) const {
+    // If the face has a trimmed surface, use the trimmed planar tessellation
+    if (face->trimmedSurface()) {
+        return tessellateTrimmmedPlanarFace(face, os, vOffset, flip);
+    }
+
     auto poly = sampleBoundaryPolygon(face);
 
     // Drop exact duplicate closing vertex (closed loop).
@@ -243,7 +250,7 @@ int ObjExporter::tessellatePlanarCap(const FacePtr& face,
 }
 
 // ---------------------------------------------------------------------------
-// tessellateNURBSFace – uniform parameter-space grid
+// tessellateNURBSFace – uniform parameter-space grid (with optional trimming)
 // ---------------------------------------------------------------------------
 int ObjExporter::tessellateNURBSFace(const FacePtr& face,
                                       std::ostream& os,
@@ -251,6 +258,11 @@ int ObjExporter::tessellateNURBSFace(const FacePtr& face,
                                       bool flip) const {
     auto surf = face->surface();
     if (!surf) return 0;
+
+    // If face has a trimmed surface, use trimmed tessellation
+    if (face->trimmedSurface()) {
+        return tessellateTrimmmedNURBSFace(face, os, vOffset, flip);
+    }
 
     const int nu = m_uSteps;
     const int nv = m_vSteps;
@@ -299,35 +311,125 @@ int ObjExporter::tessellateNURBSFace(const FacePtr& face,
 }
 
 // ---------------------------------------------------------------------------
-// writePrecomputedMesh
-// Used when the Solid carries a pre-computed triangle mesh (e.g. a Boolean
-// operation result).  Each triangle is emitted as vertex + normal + face.
+// tessellateTrimmmedNURBSFace – trimmed curved NURBS face
 // ---------------------------------------------------------------------------
-void ObjExporter::writePrecomputedMesh(const SolidPtr& solid,
-                                        const std::string& objectName,
-                                        std::ostream& os,
-                                        int& vertexOffset) const {
-    os << "o " << objectName << "\n\n";
-    os << "g " << objectName << "_mesh\n";
+int ObjExporter::tessellateTrimmmedNURBSFace(const FacePtr& face,
+                                              std::ostream& os,
+                                              int vOffset,
+                                              bool flip) const {
+    auto trimSurf = face->trimmedSurface();
+    if (!trimSurf) return tessellateNURBSFace(face, os, vOffset, flip);
 
-    const auto& mesh = solid->computedMesh();
-    for (const auto& t : mesh) {
-        // Write 3 vertices + normals
-        os << "v " << std::fixed << std::setprecision(6)
-           << t.v0.x << ' ' << t.v0.y << ' ' << t.v0.z << '\n';
-        os << "v " << t.v1.x << ' ' << t.v1.y << ' ' << t.v1.z << '\n';
-        os << "v " << t.v2.x << ' ' << t.v2.y << ' ' << t.v2.z << '\n';
-        os << "vn " << t.n0.x << ' ' << t.n0.y << ' ' << t.n0.z << '\n';
-        os << "vn " << t.n1.x << ' ' << t.n1.y << ' ' << t.n1.z << '\n';
-        os << "vn " << t.n2.x << ' ' << t.n2.y << ' ' << t.n2.z << '\n';
-        int b = vertexOffset;
-        os << "f " << b   << "//" << b
-           << ' '  << b+1 << "//" << b+1
-           << ' '  << b+2 << "//" << b+2 << '\n';
-        vertexOffset += 3;
+    const auto& surf = trimSurf->base();
+    const int nu = m_uSteps;
+    const int nv = m_vSteps;
+    const double u0 = surf.uParamStart();
+    const double u1 = surf.uParamEnd();
+    const double v0 = surf.vParamStart();
+    const double v1 = surf.vParamEnd();
+
+    // Build grid of active flags
+    std::vector<bool> active((nu+1)*(nv+1), false);
+    std::vector<Point3D> pts((nu+1)*(nv+1));
+    std::vector<Vec3>    nrm((nu+1)*(nv+1));
+
+    for (int j = 0; j <= nv; ++j) {
+        double v = v0 + (v1 - v0) * static_cast<double>(j) / nv;
+        for (int i = 0; i <= nu; ++i) {
+            double u = u0 + (u1 - u0) * static_cast<double>(i) / nu;
+            int idx = j * (nu + 1) + i;
+            active[idx] = trimSurf->isActive(u, v);
+            pts[idx] = surf.evaluate(u, v);
+            Vec3 n = surf.normal(u, v);
+            nrm[idx] = flip ? -n : n;
+        }
     }
-    os << '\n';
+
+    // Write all points (we'll only use active ones via face indices)
+    for (int k = 0; k < static_cast<int>(pts.size()); ++k) {
+        writeVertex(os, pts[k]);
+        writeNormal(os, nrm[k]);
+    }
+
+    auto gidx = [&](int i, int j) { return j * (nu + 1) + i; };
+    auto vidx = [&](int i, int j) { return vOffset + j * (nu + 1) + i; };
+
+    for (int j = 0; j < nv; ++j) {
+        for (int i = 0; i < nu; ++i) {
+            bool a00 = active[gidx(i,   j)];
+            bool a10 = active[gidx(i+1, j)];
+            bool a01 = active[gidx(i,   j+1)];
+            bool a11 = active[gidx(i+1, j+1)];
+            if (a00 && a10 && a11) writeFaceTri(os, vidx(i,j), vidx(i+1,j), vidx(i+1,j+1), flip);
+            if (a00 && a11 && a01) writeFaceTri(os, vidx(i,j), vidx(i+1,j+1), vidx(i,j+1), flip);
+        }
+    }
+
+    return static_cast<int>(pts.size());
 }
+
+// ---------------------------------------------------------------------------
+// tessellateTrimmmedPlanarFace – trimmed planar face
+// ---------------------------------------------------------------------------
+int ObjExporter::tessellateTrimmmedPlanarFace(const FacePtr& face,
+                                               std::ostream& os,
+                                               int vOffset,
+                                               bool flip) const {
+    auto trimSurf = face->trimmedSurface();
+    if (!trimSurf) return tessellatePlanarCap(face, os, vOffset, flip);
+
+    const auto& surf = trimSurf->base();
+    const double u0 = surf.uParamStart(), u1 = surf.uParamEnd();
+    const double v0 = surf.vParamStart(), v1 = surf.vParamEnd();
+
+    const int steps = m_curveSamples * 4;
+    const int N = steps + 1;
+
+    std::vector<bool>    active(N * N, false);
+    std::vector<Point3D> pts(N * N);
+    std::vector<Vec3>    nrm(N * N);
+
+    // Compute face normal
+    Vec3 faceNormal = surf.normal((u0 + u1) * 0.5, (v0 + v1) * 0.5);
+    if (faceNormal.isZero()) faceNormal = Vec3::unitZ();
+    if (flip) faceNormal = -faceNormal;
+
+    for (int j = 0; j < N; ++j) {
+        double v = v0 + (v1 - v0) * static_cast<double>(j) / steps;
+        for (int i = 0; i < N; ++i) {
+            double u = u0 + (u1 - u0) * static_cast<double>(i) / steps;
+            int idx = j * N + i;
+            active[idx] = trimSurf->isActive(u, v);
+            pts[idx] = surf.evaluate(u, v);
+            nrm[idx] = faceNormal;
+        }
+    }
+
+    for (int k = 0; k < N * N; ++k) {
+        writeVertex(os, pts[k]);
+        writeNormal(os, nrm[k]);
+    }
+
+    auto gidx = [&](int i, int j) { return j * N + i; };
+    auto vidx = [&](int i, int j) { return vOffset + j * N + i; };
+
+    for (int j = 0; j < steps; ++j) {
+        for (int i = 0; i < steps; ++i) {
+            bool a00 = active[gidx(i,   j)];
+            bool a10 = active[gidx(i+1, j)];
+            bool a01 = active[gidx(i,   j+1)];
+            bool a11 = active[gidx(i+1, j+1)];
+            if (a00 && a10 && a11) writeFaceTri(os, vidx(i,j), vidx(i+1,j), vidx(i+1,j+1), flip);
+            if (a00 && a11 && a01) writeFaceTri(os, vidx(i,j), vidx(i+1,j+1), vidx(i,j+1), flip);
+        }
+    }
+
+    return N * N;
+}
+
+// ---------------------------------------------------------------------------
+// writePrecomputedMesh REMOVED (no longer needed)
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // writeSolidToStream
@@ -337,13 +439,6 @@ void ObjExporter::writeSolidToStream(const SolidPtr& solid,
                                       std::ostream& os,
                                       int& vertexOffset) const {
     if (!solid) return;
-
-    // If the solid carries a pre-computed mesh (e.g. Boolean result),
-    // write that directly instead of re-tessellating NURBS shells.
-    if (solid->hasComputedMesh()) {
-        writePrecomputedMesh(solid, objectName, os, vertexOffset);
-        return;
-    }
 
     os << "o " << objectName << "\n\n";
 
@@ -355,18 +450,29 @@ void ObjExporter::writeSolidToStream(const SolidPtr& solid,
         for (const auto& face : shell->faces()) {
             ++faceIdx;
             os << "g " << prefix << "_face" << faceIdx << '\n';
+
+            // Detect flipped faces (from boolean reversal)
+            bool isFlipped = !face->name().empty() &&
+                              face->name().size() >= 10 &&
+                              face->name().substr(0, 10) == "__flipped__";
+            bool effectiveFlip = flip ^ isFlipped;
+
             int added = 0;
-            if (isFlatFace(face))
-                added = tessellatePlanarCap(face, os, vertexOffset, flip);
-            else
-                added = tessellateNURBSFace(face, os, vertexOffset, flip);
+            if (face->trimmedSurface()) {
+                if (isFlatFace(face))
+                    added = tessellateTrimmmedPlanarFace(face, os, vertexOffset, effectiveFlip);
+                else
+                    added = tessellateTrimmmedNURBSFace(face, os, vertexOffset, effectiveFlip);
+            } else if (isFlatFace(face)) {
+                added = tessellatePlanarCap(face, os, vertexOffset, effectiveFlip);
+            } else {
+                added = tessellateNURBSFace(face, os, vertexOffset, effectiveFlip);
+            }
             vertexOffset += added;
         }
     };
 
     tessellateShell(solid->outerShell(), objectName + "_outer", false);
-    // Void shells (e.g. the B operand of Difference) are rendered flipped
-    // so they appear as interior cavity surfaces.
     for (std::size_t i = 0; i < solid->voids().size(); ++i)
         tessellateShell(solid->voids()[i],
                         objectName + "_void" + std::to_string(i),

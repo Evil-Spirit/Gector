@@ -27,6 +27,8 @@ endif()
 add_library(gector
     src/nurbs/nurbs_curve.cpp
     src/nurbs/nurbs_surface.cpp
+    src/nurbs/nurbs_intersection.cpp
+    src/nurbs/trimmed_nurbs_surface.cpp
     src/brep/topology.cpp
     src/brep/brep_builder.cpp
     src/sketch/sketch_entity.cpp
