@@ -111,6 +111,13 @@ private:
     /// defined by `normal`.  Returns a list of {a,b,c} index triplets into pts.
     static std::vector<std::array<int,3>>
         triangulatePolygon(const std::vector<Vec3>& pts, const Vec3& normal);
+
+    /// Write a pre-computed triangle mesh (stored on the Solid by Boolean
+    /// operations) directly to the OBJ stream.
+    void writePrecomputedMesh(const SolidPtr& solid,
+                               const std::string& objectName,
+                               std::ostream& os,
+                               int& vertexOffset) const;
 };
 
 } // namespace gector

@@ -299,6 +299,37 @@ int ObjExporter::tessellateNURBSFace(const FacePtr& face,
 }
 
 // ---------------------------------------------------------------------------
+// writePrecomputedMesh
+// Used when the Solid carries a pre-computed triangle mesh (e.g. a Boolean
+// operation result).  Each triangle is emitted as vertex + normal + face.
+// ---------------------------------------------------------------------------
+void ObjExporter::writePrecomputedMesh(const SolidPtr& solid,
+                                        const std::string& objectName,
+                                        std::ostream& os,
+                                        int& vertexOffset) const {
+    os << "o " << objectName << "\n\n";
+    os << "g " << objectName << "_mesh\n";
+
+    const auto& mesh = solid->computedMesh();
+    for (const auto& t : mesh) {
+        // Write 3 vertices + normals
+        os << "v " << std::fixed << std::setprecision(6)
+           << t.v0.x << ' ' << t.v0.y << ' ' << t.v0.z << '\n';
+        os << "v " << t.v1.x << ' ' << t.v1.y << ' ' << t.v1.z << '\n';
+        os << "v " << t.v2.x << ' ' << t.v2.y << ' ' << t.v2.z << '\n';
+        os << "vn " << t.n0.x << ' ' << t.n0.y << ' ' << t.n0.z << '\n';
+        os << "vn " << t.n1.x << ' ' << t.n1.y << ' ' << t.n1.z << '\n';
+        os << "vn " << t.n2.x << ' ' << t.n2.y << ' ' << t.n2.z << '\n';
+        int b = vertexOffset;
+        os << "f " << b   << "//" << b
+           << ' '  << b+1 << "//" << b+1
+           << ' '  << b+2 << "//" << b+2 << '\n';
+        vertexOffset += 3;
+    }
+    os << '\n';
+}
+
+// ---------------------------------------------------------------------------
 // writeSolidToStream
 // ---------------------------------------------------------------------------
 void ObjExporter::writeSolidToStream(const SolidPtr& solid,
@@ -306,6 +337,13 @@ void ObjExporter::writeSolidToStream(const SolidPtr& solid,
                                       std::ostream& os,
                                       int& vertexOffset) const {
     if (!solid) return;
+
+    // If the solid carries a pre-computed mesh (e.g. Boolean result),
+    // write that directly instead of re-tessellating NURBS shells.
+    if (solid->hasComputedMesh()) {
+        writePrecomputedMesh(solid, objectName, os, vertexOffset);
+        return;
+    }
 
     os << "o " << objectName << "\n\n";
 

@@ -168,6 +168,18 @@ private:
 };
 
 // ===========================================================================
+/// @brief A single triangle with per-vertex positions and per-vertex normals.
+///
+/// Used to store a pre-tessellated mesh on a Solid (e.g. the result of a
+/// mesh-level Boolean operation) so that the OBJ exporter can write it
+/// directly without re-tessellating NURBS shells.
+// ===========================================================================
+struct Triangle {
+    Vec3 v0, v1, v2;  ///< Vertex positions
+    Vec3 n0, n1, n2;  ///< Per-vertex outward unit normals
+};
+
+// ===========================================================================
 /// @brief A 3-D solid bounded by one outer shell and optional void shells.
 // ===========================================================================
 class Solid {
@@ -184,12 +196,26 @@ public:
     /// Total number of faces across all shells.
     std::size_t faceCount() const;
 
+    // -----------------------------------------------------------------------
+    // Pre-computed triangle mesh (optional).
+    //
+    // When non-empty this mesh is used by ObjExporter instead of
+    // re-tessellating NURBS shells.  Boolean operations populate this
+    // field with the result of the mesh-level classification pass.
+    // -----------------------------------------------------------------------
+    void setComputedMesh(std::vector<Triangle> mesh) {
+        m_computedMesh = std::move(mesh);
+    }
+    bool                         hasComputedMesh() const noexcept { return !m_computedMesh.empty(); }
+    const std::vector<Triangle>& computedMesh()    const noexcept { return m_computedMesh; }
+
     const std::string& name() const noexcept { return m_name; }
     void setName(const std::string& n) { m_name = n; }
 
 private:
     ShellPtr              m_outer;
     std::vector<ShellPtr> m_voids;
+    std::vector<Triangle> m_computedMesh;
     std::string           m_name;
 };
 
