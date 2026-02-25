@@ -3,6 +3,13 @@
 #include <stdexcept>
 #include <ostream>
 
+// Portable math constant: M_PI is not part of the C++ standard.
+// _USE_MATH_DEFINES (set in CMakeLists.txt) exposes it on MSVC; the guard
+// below provides a fallback for any other build configuration.
+#ifndef M_PI
+#  define M_PI 3.14159265358979323846
+#endif
+
 namespace gector {
 
 /// 3-component double-precision vector / point.

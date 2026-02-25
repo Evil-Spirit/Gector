@@ -6,6 +6,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ------------------------------------------------------------------------------
+# Portable math constants (M_PI etc.) for MSVC
+# _USE_MATH_DEFINES must be set before any <cmath> / <math.h> include.
+# Injecting it as a global compile definition ensures it applies to every TU.
+# ------------------------------------------------------------------------------
+add_compile_definitions(_USE_MATH_DEFINES)
+
+# ------------------------------------------------------------------------------
 # Compiler warnings
 # ------------------------------------------------------------------------------
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
