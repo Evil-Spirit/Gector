@@ -32,6 +32,7 @@ add_library(gector
     src/operations/revolve.cpp
     src/operations/boolean_op.cpp
     src/operations/fillet.cpp
+    src/io/obj_exporter.cpp
 )
 
 target_include_directories(gector

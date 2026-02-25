@@ -298,47 +298,16 @@ NURBSSurface NURBSSurface::makeCone(const Point3D& base,
 }
 
 // ---------------------------------------------------------------------------
-// Factory: sphere  (NURBS Book §8.3, two-patch construction merged here)
-// We use a product of two circular arcs with appropriate weights.
+// Factory: sphere  (exact: revolve a semicircle arc around the Z axis)
 // ---------------------------------------------------------------------------
 NURBSSurface NURBSSurface::makeSphere(const Point3D& center, double radius) {
-    // Latitude arc: semicircle from south to north pole (v direction, degree 2)
-    // Longitude: full circle (u direction, degree 2)
-    // 9 × 5 control points
-
-    double w1 = std::cos(M_PI / 4.0);
-
-    // Latitude points (in XZ plane, from south pole to north pole)
-    // 5 points for semicircle: angle 0=south to PI=north
-    double vAngles[5] = {-M_PI/2, -M_PI/4, 0, M_PI/4, M_PI/2};
-    double vWeights[5] = {1, w1, 1, w1, 1};
-
-    // Longitude: 9 points for full circle
-    double uAngles[9] = {0, M_PI/4, M_PI/2, 3*M_PI/4, M_PI,
-                          5*M_PI/4, 3*M_PI/2, 7*M_PI/4, 2*M_PI};
-    double uWeights[9] = {1, w1, 1, w1, 1, w1, 1, w1, 1};
-
-    int uCnt = 9, vCnt = 5;
-    std::vector<Vec3>   pts(uCnt * vCnt);
-    std::vector<double> ws (uCnt * vCnt);
-
-    for (int i = 0; i < uCnt; ++i) {
-        for (int j = 0; j < vCnt; ++j) {
-            double vA = vAngles[j];
-            double uA = uAngles[i];
-            double rj = radius * std::cos(vA);
-            double zj = radius * std::sin(vA);
-            pts[i*vCnt+j] = center + Vec3{rj * std::cos(uA),
-                                           rj * std::sin(uA),
-                                           zj};
-            ws[i*vCnt+j] = uWeights[i] * vWeights[j];
-        }
-    }
-
-    std::vector<double> uKnots = {0,0,0, 0.25,0.25, 0.5,0.5, 0.75,0.75, 1,1,1};
-    std::vector<double> vKnots = {0,0,0, 0.5,0.5, 1,1,1};
-
-    return NURBSSurface(2, 2, uCnt, vCnt, pts, ws, uKnots, vKnots);
+    // A semicircular profile in the XZ plane (from south pole to north pole)
+    // revolved 360° around the Z axis gives an exact rational sphere.
+    NURBSCurve profile = NURBSCurve::makeArc(
+        center, radius,
+        Vec3{1,0,0}, Vec3{0,0,1},   // xAxis=X, yAxis=Z for the arc plane
+        -M_PI / 2.0, M_PI / 2.0);   // south pole (-90°) to north pole (+90°)
+    return makeRevolutionSurface(profile, center, Vec3{0,0,1}, 2.0 * M_PI);
 }
 
 // ---------------------------------------------------------------------------
